@@ -1,0 +1,6 @@
+{
+  "name": "ChannelLife",
+  "description": "Directory ufficiale dei canali WhatsApp appartenenti al gruppo ChannelLife. Scopri canali selezionati per argomento, invia richieste di creazione o adesione e gestisci il catalogo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

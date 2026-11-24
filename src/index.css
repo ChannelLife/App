@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Sampled directly from the official ChannelLife logo & reference surfaces */
+    --cl-graphite: #24262B;
+    --cl-graphite-surface: #2B2E35;
+    --cl-graphite-border: #383B44;
+    --cl-orange: #F29243;
+    --cl-orange-hover: #E07D2B;
+    --cl-orange-soft: #FFF1E4;
+    --cl-orange-text-on-soft: #A84A00;
+    --cl-paper: #F4F4F3;
+    --cl-white: #FFFFFF;
+    --cl-ink: #1E2025;
+    --cl-ink-muted: #5A5E66;
+    --cl-border-light: #E2E2DF;
+
+    --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  html,
+  body {
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
