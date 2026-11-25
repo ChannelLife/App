@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowDown,
@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   Folder,
+  KeyRound,
   LogOut,
   Mail,
   MousePointerClick,
@@ -31,6 +32,22 @@ import type {
   RequestStatus,
 } from '../types/channellife';
 import {
+  approveAdminRequest,
+  createAdminCategory,
+  deleteAdminCategory,
+  deleteAdminChannel,
+  deleteAdminRequest,
+  isPasswordProviderLinked,
+  renameAdminCategory,
+  reorderAdminCategories,
+  saveAdminChannel,
+  setOrUpdateAdminPassword,
+  signOutAdmin,
+  subscribeToAdminDashboard,
+  toggleAdminChannelPublished,
+  updateAdminRequest,
+} from '../services/channellifeFirestore';
+import {
   isValidOptionalImageUrl,
   isValidPhone,
   normalizeChannelImageUrl,
@@ -42,11 +59,9 @@ import { FourDotsIcon } from './FourDotsIcon';
 type AdminTab = 'overview' | 'channels' | 'categories' | 'requests';
 
 interface AdminDashboardProps {
-  token: string;
   onUnauthorized: () => void;
   onExitToPublic: () => void;
   onLoggedOut: () => void;
-  refreshSignal: number;
 }
 
 function formatDateIt(iso: string): string {
@@ -75,11 +90,9 @@ function statusPillClasses(status: RequestStatus): string {
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
-  token,
   onUnauthorized,
   onExitToPublic,
   onLoggedOut,
-  refreshSignal,
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -144,19 +157,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ctx.drawImage(bitmap, 0, 0, width, height);
       bitmap.close();
 
-      const outType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
-      const dataUrl = canvas.toDataURL(outType, 0.88);
+      let dataUrl =
+        file.type === 'image/png'
+          ? canvas.toDataURL('image/png')
+          : canvas.toDataURL('image/jpeg', 0.88);
 
-      const res = await authFetch('/api/admin/upload-logo', {
-        method: 'POST',
-        body: JSON.stringify({ dataUrl }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.url) {
-        setChError(data.error || 'Impossibile caricare il logo.');
+      if (dataUrl.length > 220000) {
+        dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+      }
+      if (dataUrl.length > 240000) {
+        dataUrl = canvas.toDataURL('image/jpeg', 0.62);
+      }
+      if (dataUrl.length > 245000) {
+        setChError('Immagine troppo pesante: scegli un file più leggero o usa un link diretto.');
         return;
       }
-      setChImageUrl(data.url);
+
+      setChImageUrl(dataUrl);
     } catch {
       setChError('Impossibile elaborare l’immagine selezionata.');
     } finally {
@@ -196,6 +213,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [deletingRequest, setDeletingRequest] = useState<ChannelRequest | null>(null);
   const [deletingRequestBusy, setDeletingRequestBusy] = useState(false);
 
+  // Admin Password Modal
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [adminNewPassword, setAdminNewPassword] = useState('');
+  const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
+  const [showAdminNewPassword, setShowAdminNewPassword] = useState(false);
+  const [adminPasswordError, setAdminPasswordError] = useState<string | null>(null);
+  const [adminPasswordBusy, setAdminPasswordBusy] = useState(false);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     window.setTimeout(() => {
@@ -203,71 +228,88 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }, 3500);
   };
 
-  const authFetch = useCallback(
-    async (url: string, options: RequestInit = {}) => {
-      const headers = new Headers(options.headers);
-      headers.set('Authorization', `Bearer ${token}`);
-      if (options.body && !headers.has('Content-Type')) {
-        headers.set('Content-Type', 'application/json');
-      }
-      const res = await fetch(url, { ...options, headers });
-      if (res.status === 401) {
-        onUnauthorized();
-        throw new Error('Sessione scaduta.');
-      }
-      return res;
-    },
-    [token, onUnauthorized]
-  );
-
-  const loadAllAdminData = useCallback(async () => {
-    try {
-      setErrorBanner(null);
-      const [overviewRes, channelsRes, categoriesRes, requestsRes] = await Promise.all([
-        authFetch('/api/admin/overview'),
-        authFetch('/api/admin/channels'),
-        authFetch('/api/admin/categories'),
-        authFetch('/api/admin/requests'),
-      ]);
-
-      if (!overviewRes.ok || !channelsRes.ok || !categoriesRes.ok || !requestsRes.ok) {
-        throw new Error('Errore nel caricamento dei dati amministrativi.');
-      }
-
-      const [overviewData, channelsData, categoriesData, requestsData] = await Promise.all([
-        overviewRes.json(),
-        channelsRes.json(),
-        categoriesRes.json(),
-        requestsRes.json(),
-      ]);
-
-      setStats(overviewData.stats);
-      setChannels(channelsData.channels);
-      setCategories(categoriesData.categories);
-      setRequests(requestsData.requests);
-    } catch (err) {
-      if (err instanceof Error && err.message !== 'Sessione scaduta.') {
-        setErrorBanner(err.message);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [authFetch]);
-
   useEffect(() => {
-    loadAllAdminData();
-  }, [loadAllAdminData, refreshSignal]);
+    setLoading(true);
+    setErrorBanner(null);
+
+    const unsubscribe = subscribeToAdminDashboard(
+      (snapshot) => {
+        setStats(snapshot.stats);
+        setChannels(snapshot.channels);
+        setCategories(snapshot.categories);
+        setRequests(snapshot.requests);
+        setLoading(false);
+        setErrorBanner(null);
+      },
+      (msg) => {
+        setLoading(false);
+        if (msg.toLowerCase().includes('permission')) {
+          onUnauthorized();
+          return;
+        }
+        setErrorBanner(msg);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [onUnauthorized]);
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/admin/logout', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await signOutAdmin();
     } catch {
-      // Ignore network errors on logout
+      // Ignore signout error
     }
     onLoggedOut();
+  };
+
+  const openPasswordModal = () => {
+    setAdminNewPassword('');
+    setAdminConfirmPassword('');
+    setShowAdminNewPassword(false);
+    setAdminPasswordError(null);
+    setPasswordModalOpen(true);
+  };
+
+  const handleSaveAdminPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminPasswordError(null);
+    if (adminNewPassword.length < 8) {
+      setAdminPasswordError('Scegli una password di almeno 8 caratteri.');
+      return;
+    }
+    if (adminNewPassword !== adminConfirmPassword) {
+      setAdminPasswordError('Le due password non coincidono.');
+      return;
+    }
+
+    setAdminPasswordBusy(true);
+    try {
+      const result = await setOrUpdateAdminPassword(adminNewPassword);
+      setPasswordModalOpen(false);
+      if (result.verificationRequired) {
+        showToast(
+          'Password collegata! Conferma l’email di verifica inviata all’indirizzo amministratore per completare.'
+        );
+      } else {
+        showToast('Password amministratore salvata. Ora puoi usarla per accedere direttamente.');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('operation-not-allowed')) {
+        setAdminPasswordError(
+          'Abilita prima "Email/Password" nella Firebase Console (Authentication → Sign-in method → Email/Password) per attivare l’accesso con password.'
+        );
+      } else if (msg.includes('requires-recent-login')) {
+        setAdminPasswordError(
+          'Per motivi di sicurezza, esci e rientra un attimo con Google prima di modificare la password.'
+        );
+      } else {
+        setAdminPasswordError(msg || 'Impossibile salvare la password amministratore.');
+      }
+    } finally {
+      setAdminPasswordBusy(false);
+    }
   };
 
   // --- Channel CRUD ---
@@ -324,7 +366,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
     if (!isValidOptionalImageUrl(chImageUrl)) {
-      setChError('L’URL immagine deve iniziare con https://, /assets/ oppure /uploads/.');
+      setChError('L’URL immagine deve iniziare con https:// oppure ./assets/ (o essere caricato dal dispositivo).');
       return;
     }
     if (chOwnerPhone.trim() && !isValidPhone(chOwnerPhone)) {
@@ -332,11 +374,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
+    const selectedCategory = categories.find((c) => c.id === chCategoryId);
+    if (!selectedCategory) {
+      setChError('Categoria selezionata non valida.');
+      return;
+    }
+
     setChSaving(true);
     try {
-      const payload = {
+      await saveAdminChannel(editingChannel ? editingChannel.id : null, {
         name: chName.trim(),
-        categoryId: chCategoryId,
+        categoryId: selectedCategory.id,
+        categoryName: selectedCategory.name,
         description: chDescription.trim(),
         officialUrl: normalizedUrl,
         imageUrl: chImageUrl.trim() || null,
@@ -344,28 +393,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         sortOrder: Number.parseInt(chSortOrder, 10) || 1,
         verified: chVerified,
         published: chPublished,
-      };
-
-      const url = editingChannel
-        ? `/api/admin/channels/${encodeURIComponent(editingChannel.id)}`
-        : '/api/admin/channels';
-      const method = editingChannel ? 'PATCH' : 'POST';
-
-      const res = await authFetch(url, {
-        method,
-        body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setChError(data.error || 'Impossibile salvare il canale.');
-        return;
-      }
 
       setChannelModalOpen(false);
       showToast(editingChannel ? 'Canale aggiornato.' : 'Canale aggiunto al catalogo.');
-      await loadAllAdminData();
     } catch (err) {
-      setChError(err instanceof Error ? err.message : 'Errore di salvataggio.');
+      setChError(err instanceof Error && !err.message.startsWith('{') ? err.message : 'Errore di salvataggio.');
     } finally {
       setChSaving(false);
     }
@@ -374,21 +407,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleTogglePublish = async (channel: AdminChannel) => {
     setOpenMenuChannelId(null);
     try {
-      const res = await authFetch(`/api/admin/channels/${encodeURIComponent(channel.id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ published: !channel.published }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        setErrorBanner(data.error || 'Impossibile aggiornare lo stato del canale.');
-        return;
-      }
+      await toggleAdminChannelPublished(channel.id, !channel.published);
       showToast(channel.published ? 'Canale nascosto dal catalogo.' : 'Canale pubblicato nel catalogo.');
-      await loadAllAdminData();
     } catch (err) {
-      if (err instanceof Error && err.message !== 'Sessione scaduta.') {
-        setErrorBanner(err.message);
-      }
+      setErrorBanner(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Impossibile aggiornare lo stato del canale.'
+      );
     }
   };
 
@@ -396,18 +422,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!deletingChannel) return;
     setDeletingChannelBusy(true);
     try {
-      const res = await authFetch(
-        `/api/admin/channels/${encodeURIComponent(deletingChannel.id)}`,
-        { method: 'DELETE' }
-      );
-      if (!res.ok) {
-        const data = await res.json();
-        setErrorBanner(data.error || 'Impossibile eliminare il canale.');
-        return;
-      }
+      await deleteAdminChannel(deletingChannel.id);
       setDeletingChannel(null);
       showToast('Canale rimosso dalla directory ChannelLife.');
-      await loadAllAdminData();
+    } catch (err) {
+      setErrorBanner(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Impossibile eliminare il canale.'
+      );
     } finally {
       setDeletingChannelBusy(false);
     }
@@ -423,18 +446,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     setCategoryBusy(true);
     try {
-      const res = await authFetch('/api/admin/categories', {
-        method: 'POST',
-        body: JSON.stringify({ name: newCategoryName.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setCategoryError(data.error || 'Impossibile creare la categoria.');
-        return;
-      }
+      await createAdminCategory(newCategoryName.trim(), categories.length + 1);
       setNewCategoryName('');
       showToast('Categoria creata.');
-      await loadAllAdminData();
+    } catch (err) {
+      setCategoryError(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Impossibile creare la categoria.'
+      );
     } finally {
       setCategoryBusy(false);
     }
@@ -449,22 +469,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     setCategoryBusy(true);
     try {
-      const res = await authFetch(
-        `/api/admin/categories/${encodeURIComponent(renamingCategory.id)}`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ name: renameValue.trim() }),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        setCategoryError(data.error || 'Impossibile rinominare la categoria.');
-        return;
-      }
+      const channelsInCat = channels.filter((c) => c.categoryId === renamingCategory.id);
+      await renameAdminCategory(renamingCategory.id, renameValue.trim(), channelsInCat);
       setRenamingCategory(null);
       setRenameValue('');
       showToast('Categoria rinominata.');
-      await loadAllAdminData();
+    } catch (err) {
+      setCategoryError(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Impossibile rinominare la categoria.'
+      );
     } finally {
       setCategoryBusy(false);
     }
@@ -480,17 +495,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     setCategories(reordered);
     try {
-      const res = await authFetch('/api/admin/categories/reorder', {
-        method: 'PATCH',
-        body: JSON.stringify({ orderedIds }),
-      });
-      if (!res.ok) {
-        await loadAllAdminData();
-        return;
-      }
+      await reorderAdminCategories(orderedIds);
       showToast('Ordine categorie aggiornato.');
     } catch {
-      await loadAllAdminData();
+      setErrorBanner('Impossibile aggiornare l’ordine delle categorie.');
     }
   };
 
@@ -503,31 +511,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleConfirmDeleteCategory = async () => {
     if (!deletingCategory) return;
-    const count = deletingCategory.channelCount ?? 0;
-    if (count > 0 && !reassignTargetId) {
+    const channelsToReassign = channels.filter((c) => c.categoryId === deletingCategory.id);
+    const targetCategory = categories.find((c) => c.id === reassignTargetId);
+    if (channelsToReassign.length > 0 && !targetCategory) {
       setCategoryError('Crea prima un’altra categoria in cui riassegnare i canali.');
       return;
     }
     setCategoryBusy(true);
     setCategoryError(null);
     try {
-      const res = await authFetch(
-        `/api/admin/categories/${encodeURIComponent(deletingCategory.id)}`,
-        {
-          method: 'DELETE',
-          body: JSON.stringify(
-            count > 0 ? { reassignToCategoryId: reassignTargetId } : {}
-          ),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        setCategoryError(data.error || 'Impossibile eliminare la categoria.');
-        return;
-      }
+      await deleteAdminCategory(deletingCategory.id, channelsToReassign, targetCategory);
       setDeletingCategory(null);
       showToast('Categoria eliminata.');
-      await loadAllAdminData();
+    } catch (err) {
+      setCategoryError(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Impossibile eliminare la categoria.'
+      );
     } finally {
       setCategoryBusy(false);
     }
@@ -539,27 +540,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     updates: { status?: RequestStatus; confirmationSent?: boolean }
   ) => {
     try {
-      const res = await authFetch(
-        `/api/admin/requests/${encodeURIComponent(reqItem.id)}`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify(updates),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        setErrorBanner(data.error || 'Impossibile aggiornare la richiesta.');
-        return;
-      }
+      await updateAdminRequest(reqItem.id, updates);
       if (selectedRequest?.id === reqItem.id) {
-        setSelectedRequest(data.request);
+        setSelectedRequest({ ...reqItem, ...updates });
       }
       showToast('Richiesta aggiornata.');
-      await loadAllAdminData();
     } catch (err) {
-      if (err instanceof Error && err.message !== 'Sessione scaduta.') {
-        setErrorBanner(err.message);
-      }
+      setErrorBanner(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Impossibile aggiornare la richiesta.'
+      );
     }
   };
 
@@ -584,7 +575,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setAppError('Inserisci un nome valido per il canale.');
       return;
     }
-    if (!appCategoryId) {
+    const targetCat = categories.find((c) => c.id === appCategoryId);
+    if (!targetCat) {
       setAppError('Seleziona la categoria di destinazione.');
       return;
     }
@@ -600,31 +592,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     setAppBusy(true);
     try {
-      const res = await authFetch(
-        `/api/admin/requests/${encodeURIComponent(approvingRequest.id)}/approve`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            channelName: appChannelName.trim(),
-            categoryId: appCategoryId,
-            description: appDescription.trim(),
-            officialUrl: normalizedUrl,
-            verified: appVerified,
-            published: appPublished,
-            confirmationSent: appConfirmationSent,
-          }),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        setAppError(data.error || 'Impossibile completare l’approvazione.');
-        return;
-      }
+      await approveAdminRequest(approvingRequest, {
+        channelName: appChannelName.trim(),
+        categoryId: targetCat.id,
+        categoryName: targetCat.name,
+        description: appDescription.trim(),
+        officialUrl: normalizedUrl,
+        verified: appVerified,
+        published: appPublished,
+        confirmationSent: appConfirmationSent,
+        sortOrder: channels.length + 1,
+      });
 
       setApprovingRequest(null);
       setSelectedRequest(null);
       showToast('Richiesta approvata e canale aggiunto al catalogo ChannelLife.');
-      await loadAllAdminData();
+    } catch (err) {
+      setAppError(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Impossibile completare l’approvazione.'
+      );
     } finally {
       setAppBusy(false);
     }
@@ -634,21 +622,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!deletingRequest) return;
     setDeletingRequestBusy(true);
     try {
-      const res = await authFetch(
-        `/api/admin/requests/${encodeURIComponent(deletingRequest.id)}`,
-        { method: 'DELETE' }
-      );
-      if (!res.ok) {
-        const data = await res.json();
-        setErrorBanner(data.error || 'Impossibile eliminare la richiesta.');
-        return;
-      }
+      await deleteAdminRequest(deletingRequest.id);
       if (selectedRequest?.id === deletingRequest.id) {
         setSelectedRequest(null);
       }
       setDeletingRequest(null);
       showToast('Richiesta eliminata.');
-      await loadAllAdminData();
+    } catch (err) {
+      setErrorBanner(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Impossibile eliminare la richiesta.'
+      );
     } finally {
       setDeletingRequestBusy(false);
     }
@@ -701,7 +686,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="p-5">
           <div className="flex items-center justify-between lg:justify-center pb-5 border-b border-[#383B44]">
             <img
-              src="/assets/channellife-logo-original.png"
+              src="./assets/channellife-logo-original.png"
               alt="ChannelLife Admin"
               className="w-24 h-24 rounded-full object-cover"
             />
@@ -754,6 +739,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
         <div className="p-4 border-t border-[#383B44] space-y-2">
+          <button
+            type="button"
+            onClick={openPasswordModal}
+            className="w-full flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-xs font-medium text-[#D1D5DB] hover:bg-[#2F3239] hover:text-white transition-colors cursor-pointer"
+          >
+            <KeyRound className="w-4 h-4 shrink-0 text-[#F29243]" />
+            <span>
+              {isPasswordProviderLinked() ? 'Cambia password admin' : 'Imposta password admin'}
+            </span>
+          </button>
           <button
             type="button"
             onClick={onExitToPublic}
@@ -857,7 +852,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="rounded-2xl bg-white border border-[#E2E2DF] p-5 flex items-center gap-4">
                   <div className="w-12 h-12 rounded-xl bg-[#24262B] flex items-center justify-center p-2 shrink-0">
                     <img
-                      src="/assets/channellife-emblem.png"
+                      src="./assets/channellife-emblem.png"
                       alt=""
                       className="w-8 h-8 object-contain"
                     />
@@ -1102,11 +1097,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="flex items-center gap-3">
                               <div className="w-9 h-9 rounded-full bg-[#24262B] flex items-center justify-center overflow-hidden shrink-0">
                                 <img
-                                  src={ch.imageUrl || '/assets/channellife-emblem.png'}
+                                  src={ch.imageUrl || './assets/channellife-emblem.png'}
                                   alt=""
                                   referrerPolicy="no-referrer"
                                   onError={(e) => {
-                                    e.currentTarget.src = '/assets/channellife-emblem.png';
+                                    e.currentTarget.src = './assets/channellife-emblem.png';
                                   }}
                                   className={
                                     ch.imageUrl
@@ -1688,11 +1683,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="flex items-center gap-3">
                   <div className="w-11 h-11 rounded-full bg-[#24262B] flex items-center justify-center overflow-hidden shrink-0 border border-[#D4D4D0]">
                     <img
-                      src={normalizeChannelImageUrl(chImageUrl) || '/assets/channellife-emblem.png'}
+                      src={normalizeChannelImageUrl(chImageUrl) || './assets/channellife-emblem.png'}
                       alt="Anteprima logo"
                       referrerPolicy="no-referrer"
                       onError={(e) => {
-                        e.currentTarget.src = '/assets/channellife-emblem.png';
+                        e.currentTarget.src = './assets/channellife-emblem.png';
                       }}
                       className={
                         normalizeChannelImageUrl(chImageUrl)
@@ -2126,6 +2121,107 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {deletingRequestBusy ? 'Eliminazione…' : 'Conferma eliminazione'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Password Configuration Modal */}
+      {passwordModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-pw-modal-title"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white text-[#1E2025] shadow-2xl border border-[#E2E2DF] overflow-hidden">
+            <div className="px-6 py-4 bg-[#24262B] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <KeyRound className="w-5 h-5 text-[#F29243]" />
+                <h2 id="admin-pw-modal-title" className="font-display text-lg font-bold">
+                  {isPasswordProviderLinked() ? 'Aggiorna password admin' : 'Imposta password admin'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPasswordModalOpen(false)}
+                aria-label="Chiudi"
+                className="p-1.5 rounded-lg text-[#D1D5DB] hover:bg-[#383B44]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAdminPassword} className="p-6 space-y-4">
+              <p className="text-xs text-[#5A5E66] leading-relaxed">
+                Imposta una password personale (minimo 8 caratteri) per accedere in seguito al pannello admin direttamente con la password, senza popup Google.
+              </p>
+
+              {adminPasswordError && (
+                <div
+                  role="alert"
+                  className="rounded-xl bg-red-50 border border-red-200 px-3.5 py-2.5 text-xs text-red-800 leading-relaxed"
+                >
+                  {adminPasswordError}
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="adm-pw-new" className="block text-xs font-semibold mb-1">
+                  Nuova password amministratore *
+                </label>
+                <div className="relative">
+                  <input
+                    id="adm-pw-new"
+                    type={showAdminNewPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    value={adminNewPassword}
+                    onChange={(e) => setAdminNewPassword(e.target.value)}
+                    placeholder="Minimo 8 caratteri"
+                    className="w-full rounded-xl border border-[#D4D4D0] pl-3.5 pr-10 py-2 text-sm focus:border-[#F29243] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminNewPassword((v) => !v)}
+                    aria-label={showAdminNewPassword ? 'Nascondi password' : 'Mostra password'}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#5A5E66]"
+                  >
+                    {showAdminNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="adm-pw-confirm" className="block text-xs font-semibold mb-1">
+                  Conferma password *
+                </label>
+                <input
+                  id="adm-pw-confirm"
+                  type={showAdminNewPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={adminConfirmPassword}
+                  onChange={(e) => setAdminConfirmPassword(e.target.value)}
+                  placeholder="Ripeti la password"
+                  className="w-full rounded-xl border border-[#D4D4D0] px-3.5 py-2 text-sm focus:border-[#F29243] focus:outline-none"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2.5 border-t border-[#E2E2DF]">
+                <button
+                  type="button"
+                  onClick={() => setPasswordModalOpen(false)}
+                  className="rounded-xl border border-[#D4D4D0] px-4 py-2 text-xs font-semibold cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="submit"
+                  disabled={adminPasswordBusy}
+                  className="rounded-xl bg-[#F29243] hover:bg-[#E07D2B] disabled:opacity-60 px-5 py-2 text-xs font-semibold text-[#1E2025] cursor-pointer"
+                >
+                  {adminPasswordBusy ? 'Salvataggio…' : 'Salva password'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

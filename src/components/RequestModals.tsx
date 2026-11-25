@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
 import {
+  submitJoinChannelRequest,
+  submitNewChannelRequest,
+} from '../services/channellifeFirestore';
+import {
   isValidEmail,
   isValidPhone,
   normalizeWhatsAppChannelUrl,
@@ -99,30 +103,21 @@ export const RequestModals: React.FC<RequestModalsProps> = ({ mode, onClose }) =
     setServerError(null);
     setSubmitting(true);
     try {
-      const res = await fetch('/api/requests/new-channel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          channelName: newChannelName.trim(),
-          description: description.trim(),
-          motivation: newMotivation.trim(),
-          notes: notes.trim(),
-          email: newEmail.trim(),
-          phone: newPhone.trim(),
-        }),
+      const data = await submitNewChannelRequest({
+        channelName: newChannelName.trim(),
+        description: description.trim(),
+        motivation: newMotivation.trim(),
+        notes: notes.trim(),
+        email: newEmail.trim(),
+        phone: newPhone.trim(),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        if (data.fieldErrors) setErrors(data.fieldErrors);
-        setServerError(data.error || 'Impossibile inviare la richiesta.');
-        return;
-      }
-      setConfirmationMessage(
-        data.message ||
-          'Richiesta inviata. Sarà valutata dagli amministratori e l’invio non comporta l’approvazione automatica.'
+      setConfirmationMessage(data.message);
+    } catch (err) {
+      setServerError(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Errore durante l’invio della richiesta. Verifica i campi e riprova.'
       );
-    } catch {
-      setServerError('Errore di connessione. Riprova tra qualche istante.');
     } finally {
       setSubmitting(false);
     }
@@ -159,29 +154,20 @@ export const RequestModals: React.FC<RequestModalsProps> = ({ mode, onClose }) =
     setServerError(null);
     setSubmitting(true);
     try {
-      const res = await fetch('/api/requests/join-channel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          channelName: joinChannelName.trim(),
-          officialUrl: officialUrl.trim(),
-          motivation: joinMotivation.trim(),
-          email: joinEmail.trim(),
-          phone: joinPhone.trim(),
-        }),
+      const data = await submitJoinChannelRequest({
+        channelName: joinChannelName.trim(),
+        officialUrl: officialUrl.trim(),
+        motivation: joinMotivation.trim(),
+        email: joinEmail.trim(),
+        phone: joinPhone.trim(),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        if (data.fieldErrors) setErrors(data.fieldErrors);
-        setServerError(data.error || 'Impossibile inviare la richiesta.');
-        return;
-      }
-      setConfirmationMessage(
-        data.message ||
-          'Richiesta inviata. Il canale sarà esaminato dagli amministratori e non viene pubblicato automaticamente.'
+      setConfirmationMessage(data.message);
+    } catch (err) {
+      setServerError(
+        err instanceof Error && !err.message.startsWith('{')
+          ? err.message
+          : 'Errore durante l’invio della richiesta. Verifica i campi e riprova.'
       );
-    } catch {
-      setServerError('Errore di connessione. Riprova tra qualche istante.');
     } finally {
       setSubmitting(false);
     }

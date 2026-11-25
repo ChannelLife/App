@@ -19,7 +19,7 @@ export const PrivacyPage: React.FC<PrivacyPageProps> = ({ onBack }) => {
             <span>Torna a ChannelLife</span>
           </button>
           <img
-            src="/assets/channellife-logo-original.png"
+            src="./assets/channellife-logo-original.png"
             alt="ChannelLife"
             className="w-9 h-9 rounded-full object-cover"
           />

@@ -1,0 +1,301 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Used in allow list blocks to avoid get()/exists() cost explosions
+    function isBootstrapAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'mtech2415@gmail.com';
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'mtech2415@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidCategory(data) {
+      return data.keys().hasAll(['id', 'name', 'slug', 'sortOrder', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['id', 'name', 'slug', 'sortOrder', 'createdAt', 'updatedAt']) &&
+             isValidId(data.id) &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+             data.slug is string && data.slug.size() >= 1 && data.slug.size() <= 80 &&
+             data.slug.matches('^[a-z0-9\\-]+$') &&
+             data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 100000 &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidImageUrl(url) {
+      return url == null || (
+        url is string &&
+        url.size() >= 1 &&
+        url.size() <= 250000 &&
+        (
+          url.matches('^https://.*') ||
+          url.matches('^\\./assets/.*') ||
+          url.matches('^/assets/.*') ||
+          url.matches('^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$')
+        )
+      );
+    }
+
+    function isValidChannel(data) {
+      return data.keys().hasAll([
+               'id', 'name', 'categoryId', 'categoryName', 'description',
+               'officialUrl', 'imageUrl', 'verified', 'published', 'sortOrder',
+               'createdAt', 'updatedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'id', 'name', 'categoryId', 'categoryName', 'description',
+               'officialUrl', 'imageUrl', 'verified', 'published', 'sortOrder',
+               'createdAt', 'updatedAt'
+             ]) &&
+             isValidId(data.id) &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+             isValidId(data.categoryId) &&
+             data.categoryName is string && data.categoryName.size() >= 2 && data.categoryName.size() <= 80 &&
+             data.description is string && data.description.size() >= 6 && data.description.size() <= 280 &&
+             data.officialUrl is string && data.officialUrl.size() >= 25 && data.officialUrl.size() <= 300 &&
+             data.officialUrl.matches('^https://(www\\.)?whatsapp\\.com/channel/[A-Za-z0-9_\\-]{8,64}$') &&
+             isValidImageUrl(data.imageUrl) &&
+             data.verified is bool &&
+             data.published is bool &&
+             data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 100000 &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidChannelPrivate(data) {
+      return data.keys().hasAll(['channelId', 'ownerPhone', 'updatedAt']) &&
+             data.keys().hasOnly(['channelId', 'ownerPhone', 'updatedAt']) &&
+             isValidId(data.channelId) &&
+             (
+               data.ownerPhone == null ||
+               (data.ownerPhone is string && data.ownerPhone.size() >= 6 && data.ownerPhone.size() <= 32 && data.ownerPhone.matches('^[+\\d\\s().\\-]+$'))
+             ) &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidChannelClick(data) {
+      return data.keys().hasAll(['id', 'channelId', 'createdAt']) &&
+             data.keys().hasOnly(['id', 'channelId', 'createdAt']) &&
+             isValidId(data.id) &&
+             isValidId(data.channelId) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidChannelRequest(data) {
+      return data.keys().hasAll([
+               'id', 'type', 'channelName', 'description', 'officialUrl',
+               'motivation', 'notes', 'email', 'phone', 'status',
+               'confirmationSent', 'linkedChannelId', 'createdAt', 'updatedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'id', 'type', 'channelName', 'description', 'officialUrl',
+               'motivation', 'notes', 'email', 'phone', 'status',
+               'confirmationSent', 'linkedChannelId', 'createdAt', 'updatedAt'
+             ]) &&
+             isValidId(data.id) &&
+             data.type in ['new_channel', 'join_channel'] &&
+             data.channelName is string && data.channelName.size() >= 2 && data.channelName.size() <= 80 &&
+             (
+               (data.type == 'new_channel' &&
+                data.description is string && data.description.size() >= 10 && data.description.size() <= 280 &&
+                data.officialUrl == null) ||
+               (data.type == 'join_channel' &&
+                data.officialUrl is string && data.officialUrl.size() >= 25 && data.officialUrl.size() <= 300 &&
+                data.officialUrl.matches('^https://(www\\.)?whatsapp\\.com/channel/[A-Za-z0-9_\\-]{8,64}$') &&
+                data.description == null)
+             ) &&
+             data.motivation is string && data.motivation.size() >= 10 && data.motivation.size() <= 1000 &&
+             (data.notes == null || (data.notes is string && data.notes.size() <= 1000)) &&
+             data.email is string && data.email.size() >= 5 && data.email.size() <= 160 &&
+             data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$') &&
+             data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 32 &&
+             data.phone.matches('^[+\\d\\s().\\-]+$') &&
+             data.status in ['Nuova', 'In valutazione', 'Approvata', 'Rifiutata'] &&
+             data.confirmationSent is bool &&
+             (data.linkedChannelId == null || isValidId(data.linkedChannelId)) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+             data.keys().hasOnly(['uid', 'email', 'createdAt']) &&
+             isValidId(data.uid) &&
+             data.email is string && data.email.size() >= 5 && data.email.size() <= 160 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidMetaState(data) {
+      return data.keys().hasAll(['initialized', 'seededAt']) &&
+             data.keys().hasOnly(['initialized', 'seededAt']) &&
+             data.initialized is bool &&
+             data.seededAt is timestamp;
+    }
+
+    // 4. Collection Rules
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId);
+      allow list: if resource.data.sortOrder >= 0;
+      allow create: if isAdmin() &&
+                    isValidId(categoryId) &&
+                    isValidCategory(incoming()) &&
+                    incoming().id == categoryId &&
+                    incoming().createdAt == request.time &&
+                    incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+                    isValidId(categoryId) &&
+                    isValidCategory(incoming()) &&
+                    incoming().id == existing().id &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().updatedAt == request.time &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'slug', 'sortOrder', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(categoryId);
+    }
+
+    match /channels/{channelId} {
+      allow get: if isValidId(channelId) && (resource.data.published == true || isAdmin());
+      allow list: if resource.data.published == true || isBootstrapAdmin();
+      allow create: if isAdmin() &&
+                    isValidId(channelId) &&
+                    isValidChannel(incoming()) &&
+                    incoming().id == channelId &&
+                    incoming().createdAt == request.time &&
+                    incoming().updatedAt == request.time &&
+                    (
+                      exists(/databases/$(database)/documents/categories/$(incoming().categoryId)) ||
+                      existsAfter(/databases/$(database)/documents/categories/$(incoming().categoryId))
+                    );
+      allow update: if isAdmin() &&
+                    isValidId(channelId) &&
+                    isValidChannel(incoming()) &&
+                    incoming().id == existing().id &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().updatedAt == request.time &&
+                    incoming().diff(existing()).affectedKeys().hasOnly([
+                      'name', 'categoryId', 'categoryName', 'description',
+                      'officialUrl', 'imageUrl', 'verified', 'published',
+                      'sortOrder', 'updatedAt'
+                    ]) &&
+                    (
+                      exists(/databases/$(database)/documents/categories/$(incoming().categoryId)) ||
+                      existsAfter(/databases/$(database)/documents/categories/$(incoming().categoryId))
+                    );
+      allow delete: if isAdmin() && isValidId(channelId);
+    }
+
+    match /channel_private/{channelId} {
+      allow get: if isAdmin() && isValidId(channelId);
+      allow list: if isBootstrapAdmin();
+      allow create, update: if isAdmin() &&
+                            isValidId(channelId) &&
+                            isValidChannelPrivate(incoming()) &&
+                            incoming().channelId == channelId &&
+                            incoming().updatedAt == request.time &&
+                            (
+                              exists(/databases/$(database)/documents/channels/$(channelId)) ||
+                              existsAfter(/databases/$(database)/documents/channels/$(channelId))
+                            );
+      allow delete: if isAdmin() && isValidId(channelId);
+    }
+
+    match /channel_clicks/{clickId} {
+      allow get: if isAdmin() && isValidId(clickId);
+      allow list: if isBootstrapAdmin();
+      allow create: if isValidId(clickId) &&
+                    isValidChannelClick(incoming()) &&
+                    incoming().id == clickId &&
+                    incoming().createdAt == request.time &&
+                    exists(/databases/$(database)/documents/channels/$(incoming().channelId)) &&
+                    get(/databases/$(database)/documents/channels/$(incoming().channelId)).data.published == true;
+      allow delete: if isAdmin() && isValidId(clickId);
+    }
+
+    match /requests/{requestId} {
+      allow get: if isAdmin() && isValidId(requestId);
+      allow list: if isBootstrapAdmin();
+      allow create: if isValidId(requestId) &&
+                    isValidChannelRequest(incoming()) &&
+                    incoming().id == requestId &&
+                    incoming().status == 'Nuova' &&
+                    incoming().confirmationSent == false &&
+                    incoming().linkedChannelId == null &&
+                    incoming().createdAt == request.time &&
+                    incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+                    isValidId(requestId) &&
+                    isValidChannelRequest(incoming()) &&
+                    incoming().id == existing().id &&
+                    incoming().type == existing().type &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().updatedAt == request.time &&
+                    (
+                      incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+                      incoming().diff(existing()).affectedKeys().hasOnly(['confirmationSent', 'updatedAt']) ||
+                      (
+                        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'confirmationSent', 'linkedChannelId', 'updatedAt']) &&
+                        (
+                          incoming().linkedChannelId == null ||
+                          existsAfter(/databases/$(database)/documents/channels/$(incoming().linkedChannelId))
+                        )
+                      )
+                    );
+      allow delete: if isAdmin() && isValidId(requestId);
+    }
+
+    match /admins/{uid} {
+      allow get: if isAdmin() || (isVerifiedUser() && request.auth.uid == uid);
+      allow list: if isBootstrapAdmin();
+      allow create: if isAdmin() &&
+                    isValidId(uid) &&
+                    isValidAdminUser(incoming()) &&
+                    incoming().uid == uid &&
+                    incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(uid);
+    }
+
+    match /meta/{docId} {
+      allow get: if docId == 'initial_seed_v1' || isAdmin();
+      allow list: if isBootstrapAdmin();
+      allow create, update: if isAdmin() &&
+                            isValidId(docId) &&
+                            isValidMetaState(incoming()) &&
+                            incoming().seededAt == request.time;
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    match /test/{docId} {
+      allow get: if docId == 'connection';
+    }
+  }
+}

@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import type { Category, PublicChannel } from '../types/channellife';
+import { recordPublicChannelClick } from '../services/channellifeFirestore';
 import { normalizeSearchText } from '../utils/validation';
 import { FourDotsIcon } from './FourDotsIcon';
 import { ProposeButton } from './ProposeButton';
@@ -78,11 +79,7 @@ export const PublicDirectory: React.FC<PublicDirectoryProps> = ({
   };
 
   const handleChannelClick = (channelId: string) => {
-    fetch(`/api/public/channels/${encodeURIComponent(channelId)}/click`, {
-      method: 'POST',
-    }).catch(() => {
-      // Non-blocking click telemetry
-    });
+    void recordPublicChannelClick(channelId);
   };
 
   const resetFilters = () => {
@@ -100,7 +97,7 @@ export const PublicDirectory: React.FC<PublicDirectoryProps> = ({
             className="flex items-center gap-2.5 sm:gap-3 whitespace-nowrap shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F29243]"
           >
             <img
-              src="/assets/channellife-logo-original.png"
+              src="./assets/channellife-logo-original.png"
               alt="ChannelLife"
               className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover shrink-0"
             />
@@ -395,11 +392,11 @@ export const PublicDirectory: React.FC<PublicDirectoryProps> = ({
                       <div className="flex items-center justify-between gap-3">
                         <div className="w-10 h-10 rounded-full bg-[#24262B] flex items-center justify-center overflow-hidden shrink-0">
                           <img
-                            src={channel.imageUrl || '/assets/channellife-emblem.png'}
+                            src={channel.imageUrl || './assets/channellife-emblem.png'}
                             alt={`Logo ${channel.name}`}
                             referrerPolicy="no-referrer"
                             onError={(e) => {
-                              e.currentTarget.src = '/assets/channellife-emblem.png';
+                              e.currentTarget.src = './assets/channellife-emblem.png';
                             }}
                             className={
                               channel.imageUrl

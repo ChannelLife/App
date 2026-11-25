@@ -4,12 +4,20 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { onIdTokenChanged } from 'firebase/auth';
 import { AdminAuthModal } from './components/AdminAuthModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { PrivacyPage } from './components/PrivacyPage';
 import { ProposeChoiceModal } from './components/ProposeChoiceModal';
 import { PublicDirectory } from './components/PublicDirectory';
 import { RequestModals, type RequestModalMode } from './components/RequestModals';
+import { auth } from './services/firebase';
+import {
+  BOOTSTRAP_ADMIN_EMAIL,
+  ensureInitialSeed,
+  isAuthorizedAdminUser,
+  subscribeToPublicCatalog,
+} from './services/channellifeFirestore';
 import type { Category, PublicChannel } from './types/channellife';
 
 type AppView = 'public' | 'privacy' | 'admin';
@@ -20,95 +28,95 @@ export default function App() {
   const [channels, setChannels] = useState<PublicChannel[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogRetryKey, setCatalogRetryKey] = useState(0);
 
   const [proposeChoiceOpen, setProposeChoiceOpen] = useState(false);
   const [requestModalMode, setRequestModalMode] = useState<RequestModalMode>(null);
   const [adminAuthOpen, setAdminAuthOpen] = useState(false);
+  const [isAdminSignedIn, setIsAdminSignedIn] = useState(false);
 
-  // Held strictly in React memory (never localStorage/sessionStorage)
-  const [adminToken, setAdminToken] = useState<string | null>(null);
-  const [adminRefreshSignal, setAdminRefreshSignal] = useState(0);
-
-  const fetchCatalog = useCallback(async (showSpinner = false) => {
-    if (showSpinner) setLoadingCatalog(true);
+  useEffect(() => {
+    setLoadingCatalog(true);
     setCatalogError(null);
-    try {
-      const res = await fetch('/api/public/catalog', { cache: 'no-store' });
-      if (!res.ok) {
-        throw new Error('Risposta non valida dal server.');
+
+    const unsubscribe = subscribeToPublicCatalog(
+      (data) => {
+        setCategories(data.categories);
+        setChannels(data.channels);
+        setLoadingCatalog(false);
+        setCatalogError(null);
+      },
+      (msg) => {
+        setCatalogError(msg);
+        setLoadingCatalog(false);
       }
-      const data = await res.json();
-      setCategories(Array.isArray(data.categories) ? data.categories : []);
-      setChannels(Array.isArray(data.channels) ? data.channels : []);
-    } catch {
-      setCatalogError(
-        'Si è verificato un problema durante il caricamento dei canali. Riprova tra poco.'
-      );
-    } finally {
-      setLoadingCatalog(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchCatalog(true);
-  }, [fetchCatalog]);
-
-  // Real-time multi-device synchronization via Server-Sent Events
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource('/api/events');
-      eventSource.addEventListener('catalog', () => {
-        fetchCatalog(false);
-        setAdminRefreshSignal((n) => n + 1);
-      });
-      eventSource.addEventListener('requests', () => {
-        setAdminRefreshSignal((n) => n + 1);
-      });
-    } catch {
-      // Fallback gracefully if SSE is unavailable
-    }
+    );
 
     return () => {
-      eventSource?.close();
+      unsubscribe();
     };
-  }, [fetchCatalog]);
+  }, [catalogRetryKey]);
+
+  useEffect(() => {
+    const unsubscribeAuth = onIdTokenChanged(auth, async (user) => {
+      if (!user) {
+        setIsAdminSignedIn(false);
+        return;
+      }
+      const authorized = await isAuthorizedAdminUser(user);
+      setIsAdminSignedIn(authorized);
+      if (authorized) {
+        void ensureInitialSeed();
+      } else if (user.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL && !user.emailVerified) {
+        setView((curr) => {
+          if (curr === 'admin') {
+            setAdminAuthOpen(true);
+            return 'public';
+          }
+          return curr;
+        });
+      }
+    });
+    return () => unsubscribeAuth();
+  }, []);
+
+  const handleRetryCatalog = useCallback(() => {
+    setCatalogRetryKey((k) => k + 1);
+  }, []);
 
   const handleTriggerAdminLogin = () => {
     setProposeChoiceOpen(false);
     setRequestModalMode(null);
-    if (adminToken) {
+    if (isAdminSignedIn) {
       setView('admin');
       return;
     }
     setAdminAuthOpen(true);
   };
 
-  const handleAuthenticated = (token: string) => {
-    setAdminToken(token);
+  const handleAuthenticated = () => {
+    setIsAdminSignedIn(true);
     setAdminAuthOpen(false);
     setView('admin');
   };
 
   const handleAdminUnauthorized = () => {
-    setAdminToken(null);
+    setIsAdminSignedIn(false);
     setView('public');
     setAdminAuthOpen(true);
   };
 
   const handleAdminLoggedOut = () => {
-    setAdminToken(null);
+    setIsAdminSignedIn(false);
     setView('public');
   };
 
-  if (view === 'admin' && adminToken) {
+  if (view === 'admin' && isAdminSignedIn) {
     return (
       <AdminDashboard
-        token={adminToken}
         onUnauthorized={handleAdminUnauthorized}
         onExitToPublic={() => setView('public')}
         onLoggedOut={handleAdminLoggedOut}
-        refreshSignal={adminRefreshSignal}
       />
     );
   }
@@ -124,7 +132,7 @@ export default function App() {
         channels={channels}
         loading={loadingCatalog}
         error={catalogError}
-        onRetry={() => fetchCatalog(true)}
+        onRetry={handleRetryCatalog}
         onOpenProposeChoice={() => setProposeChoiceOpen(true)}
         onTriggerAdminLogin={handleTriggerAdminLogin}
         onOpenPrivacy={() => setView('privacy')}

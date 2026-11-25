@@ -54,8 +54,14 @@ export function normalizeChannelImageUrl(rawUrl: string | null | undefined): str
   const trimmed = rawUrl.trim();
   if (!trimmed) return null;
 
-  if (trimmed.startsWith('/assets/') || trimmed.startsWith('/uploads/')) {
+  if (trimmed.startsWith('/assets/')) {
+    return `.${trimmed}`;
+  }
+  if (trimmed.startsWith('./assets/')) {
     return trimmed;
+  }
+  if (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(trimmed)) {
+    return trimmed.length <= 250000 ? trimmed : null;
   }
 
   let parsed: URL;
@@ -94,8 +100,13 @@ export function normalizeChannelImageUrl(rawUrl: string | null | undefined): str
 export function isValidOptionalImageUrl(rawUrl: string | null | undefined): boolean {
   if (!rawUrl || rawUrl.trim() === '') return true;
   const trimmed = rawUrl.trim();
+  if (trimmed.startsWith('/assets/') || trimmed.startsWith('./assets/')) {
+    return trimmed.length <= 500;
+  }
+  if (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(trimmed)) {
+    return trimmed.length <= 250000;
+  }
   if (trimmed.length > 500) return false;
-  if (trimmed.startsWith('/assets/') || trimmed.startsWith('/uploads/')) return true;
   try {
     const parsed = new URL(trimmed);
     return parsed.protocol === 'https:';

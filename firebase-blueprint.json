@@ -1,0 +1,306 @@
+{
+  "entities": {
+    "Category": {
+      "title": "Category",
+      "description": "Categoria dinamica per raggruppare i canali WhatsApp ufficiali di ChannelLife.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z0-9\\-]+$"
+        },
+        "sortOrder": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "slug", "sortOrder", "createdAt", "updatedAt"]
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "Canale WhatsApp pubblico del catalogo ChannelLife (senza dati personali).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "categoryId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "categoryName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 280
+        },
+        "officialUrl": {
+          "type": "string",
+          "maxLength": 300,
+          "pattern": "^https://(www\\.)?whatsapp\\.com/channel/[A-Za-z0-9_\\-]{8,64}$"
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 250000
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "published": {
+          "type": "boolean"
+        },
+        "sortOrder": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "categoryId",
+        "categoryName",
+        "description",
+        "officialUrl",
+        "imageUrl",
+        "verified",
+        "published",
+        "sortOrder",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChannelPrivate": {
+      "title": "ChannelPrivate",
+      "description": "Metadati privati del canale (numero di telefono del proprietario), accessibili solo agli amministratori.",
+      "type": "object",
+      "properties": {
+        "channelId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerPhone": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["channelId", "ownerPhone", "updatedAt"]
+    },
+    "ChannelClick": {
+      "title": "ChannelClick",
+      "description": "Evento anonimo di apertura di un canale WhatsApp dal catalogo pubblico.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "channelId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "channelId", "createdAt"]
+    },
+    "ChannelRequest": {
+      "title": "ChannelRequest",
+      "description": "Richiesta inviata dal pubblico (nuovo canale o adesione esistente) con recapiti isolati ai soli amministratori.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["new_channel", "join_channel"]
+        },
+        "channelName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 280
+        },
+        "officialUrl": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "motivation": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1000
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "email": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 160,
+          "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$"
+        },
+        "phone": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 32,
+          "pattern": "^[+\\d\\s().-]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Nuova", "In valutazione", "Approvata", "Rifiutata"]
+        },
+        "confirmationSent": {
+          "type": "boolean"
+        },
+        "linkedChannelId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "channelName",
+        "description",
+        "officialUrl",
+        "motivation",
+        "notes",
+        "email",
+        "phone",
+        "status",
+        "confirmationSent",
+        "linkedChannelId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Account amministratore autorizzato alla gestione di ChannelLife.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 160
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "MetaState": {
+      "title": "MetaState",
+      "description": "Stato di inizializzazione del catalogo iniziale.",
+      "type": "object",
+      "properties": {
+        "initialized": {
+          "type": "boolean"
+        },
+        "seededAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["initialized", "seededAt"]
+    }
+  },
+  "firestore": {
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Categorie pubbliche dei canali ChannelLife."
+    },
+    "/channels/{channelId}": {
+      "schema": { "$ref": "#/entities/Channel" },
+      "description": "Canali pubblici mostrati nella directory (senza dati personali)."
+    },
+    "/channel_private/{channelId}": {
+      "schema": { "$ref": "#/entities/ChannelPrivate" },
+      "description": "Recapiti telefonici dei proprietari dei canali, visibili solo agli admin."
+    },
+    "/channel_clicks/{clickId}": {
+      "schema": { "$ref": "#/entities/ChannelClick" },
+      "description": "Eventi di click su Apri su WhatsApp per statistiche admin."
+    },
+    "/requests/{requestId}": {
+      "schema": { "$ref": "#/entities/ChannelRequest" },
+      "description": "Richieste inviate dai moduli pubblici con isolamento totale dei recapiti."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Lista degli amministratori autorizzati."
+    },
+    "/meta/{docId}": {
+      "schema": { "$ref": "#/entities/MetaState" },
+      "description": "Stato del seed iniziale del database."
+    }
+  }
+}
