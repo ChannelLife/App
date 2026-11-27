@@ -4,9 +4,25 @@ import fs from 'fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+function resolveViteBase(): string {
+  if (process.env.VITE_BASE_PATH) {
+    return process.env.VITE_BASE_PATH;
+  }
+  if (process.env.GITHUB_ACTIONS === 'true' && process.env.GITHUB_REPOSITORY) {
+    const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+    if (owner && repo) {
+      if (repo.toLowerCase() === `${owner.toLowerCase()}.github.io`) {
+        return '/';
+      }
+      return `/${repo}/`;
+    }
+  }
+  return './';
+}
+
 export default defineConfig(() => {
   return {
-    base: './',
+    base: resolveViteBase(),
     plugins: [
       react(),
       tailwindcss(),
